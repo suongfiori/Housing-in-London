@@ -1,0 +1,731 @@
+---
+title: "Housing in London"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup environment
+
+* Clear all variables in workspace
+
+```{r }
+rm(list = ls()) 
+```
+* Install packages
+
+Packages used: *tidyverse, janitor, readr, dplyr, skimr, DataExplorer,lubridate, ggplot2, geofacet, stringr, fpp2, viridis, patchwork, gghighlight, PerformanceAnalytics*
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Set up environment
+library(tidyverse)
+library(janitor)
+library(readr)
+library(dplyr)
+library(skimr)
+library(DataExplorer)
+library(lubridate)
+library(ggplot2)
+library(geofacet)
+library(gganimate)
+library(ggthemes)
+library(stringr)
+library(fpp2)
+library(patchwork)
+library(viridis)
+library(gghighlight)
+library(PerformanceAnalytics)
+
+```
+
+## Import Data
+
+Housing in London data sets can be found here: [https://www.kaggle.com/justinas/housing-in-london](https://www.kaggle.com/justinas/housing-in-london).
+
+```{r include=FALSE}
+# Loading csv file
+ldh_m <- read_csv("C:/Users/suong/OneDrive/Desktop/LH data/housing_in_london_monthly_variables.csv")
+head(ldh_m)
+```
+
+## Data Exploration
+
+The data sets contain monthly and yearly data which centered around the housing market of London. In this notebook, I will be looking at the monthly data.
+
+```{r include=FALSE}
+colnames(ldh_m)
+```
+List of variables in a dataset: 
+
+Field name|Description
+------|------
+**Monthly data**|
+*average_price* |Monthly average house prices
+*no_of_crimes* | Monthly number of crimes committed
+*houses_sold*  | Monthly number of houses sold
+*code*/*date*/*area*/*borough_flag* | 
+
+
+<details>
+  <summary>Click for details of **Variables Statistics\textcolor{blue}{blue}**</summary>
+
+Count unique codes for each data frame
+```{r}
+n_unique(ldh_m$code)
+```
+```{r}
+min(ldh_m$date)
+max(ldh_m$date)
+```
+
+ldh_m has data available for 1995-01-01 and 2020-01-01 with 45 unique codes.
+The year 2020 has incomplete data (only for 01 day) and will be excluded.
+
+```{r}
+# Find unique areas
+unique(ldh_m$area)
+
+```
+
+```{r}
+# Count observations in each area
+data.frame(table(ldh_m$area))
+```
+There is a discrepancy in the number of observations in some areas.
+```{r}
+table(ldh_m$borough_flag)
+```
+
+```{r }
+# Find and remove duplicates (if any)
+sum(duplicated(ldh_m))
+```
+There are no duplicates found.
+
+```{r}
+arrange(unique(ldh_m[c("code", "area")]))
+```
+There are few codes and areas that are mismatched.
+Areas: "hackney", "enfield", "south east", "tower hamlets" and codes: E12000008, E09000012, E09000010 E09000030.
+
+```{r include=FALSE}
+ldh_m %>% 
+  filter(area=="enfield") %>% 
+  arrange(desc(code, date)) # replicate with wrong code: delete entire row
+ldh_m %>% 
+  filter(area=="hackney") %>% 
+  arrange(desc(code, date)) # replicate with wrong code: delete entire row
+ldh_m %>% 
+  filter(area=="south east") %>% 
+  arrange(code, date) # replicate with wrong code: delete entire row
+ldh_m %>% 
+  filter(area=="tower hamlets") %>% 
+  arrange(code, date)  # replicate with wrong code: delete entire row
+```
+Let's have a look at the structures of the data we have, using `str(df)` function.
+Mean salary is in character type needs to be converted into numeric.
+
+```{r}
+str(ldh_m)
+```
+
+```{r}
+introduce(ldh_m)
+```
+</details>
+<br>
+
+Plot data description
+```{r}
+## View missing value distribution 
+plot_missing(ldh_m)
+```
+
+## Data Cleaning and Transformation
+
+**Summary of Data Cleaning:** 
+
+>
+* Excluded some variables from the dataset:
++ excluded column "borough_flag": using "code" column instead.
++ excluded data on date 2020-01-01: as this day seems to have incomplete data.  
+* Removed row dated 1998-04-01 for "south east" (replicate with wrong code assigned "E09000012")
+* Removed row dated 1998-04-01 for	"hackney" (replicate with wrong code	assigned "E12000008")
+* Removed row dated  1996-02-01 for	"enfield" (replicate with wrong code	assigned "E09000030")
+* Removed row dated 1996-02-01 for	"tower hamlets" (replicate with wrong code assigned "E09000010")
+* Filled up houses_sold with median values in replacing to missing values.
+
+```{r data cleaning }
+# Remove replicates with wrong codes
+m_new <- ldh_m[!(ldh_m$date == "1998-04-01" & ldh_m$area =="south east" & ldh_m$code == "E09000012") & !(ldh_m$date == "1998-04-01" & ldh_m$area =="hackney" & ldh_m$code == "E12000008") & !(ldh_m$date == "1996-02-01" & ldh_m$area =="enfield" & ldh_m$code == "E09000030") & !(ldh_m$date == "1996-02-01" & ldh_m$area =="tower hamlets" & ldh_m$code == "E09000010"),]
+
+# Exclude data date 2020-01-01 as the year is incomplete
+m_new <- m_new %>% filter(date != "2020-01-01") %>% select(-"borough_flag")
+
+```
+Houses_sold variable has a fairly small amount of missing values, imputation method will be used to replace missing values with mean values.
+```{r}
+# Filling missing values (imputation method)
+hsold_median = median(ldh_m$houses_sold, na.rm=TRUE)
+ldh_m$houses_sold[is.na(ldh_m$houses_sold)] = hsold_median
+```
+
+```{r}
+# Find unique codes
+unique(m_new$code)
+
+```
+
+According to ONS [http://statistics.data.gov.uk/atlas/resource](http://statistics.data.gov.uk/atlas/resource) are codes are defined as follow:
+
+**ONS** | **Count from dataset**
+--------|-------------------
+E09: 33 London Boroughs | 33
+E12: 9 Regions | 9 
+E13: 2 zones - Inner and Outer London | 2
+E92: Country (England) | 1
+
+The data is available at borough, inner/outer, regions,and country levels. 
+
+```{r Count number of codes per each area group}
+# Count how many boroughs are available, code starts with "E09"
+boroughs <- m_new %>% filter(str_detect(m_new$code, "E09")) 
+n_unique(boroughs$code)
+unique(boroughs$code)
+
+# Count how many regions are available, code starts with "E12"
+regions <- m_new %>% filter(str_detect(m_new$code, "E12")) 
+n_unique(regions$code)
+unique(regions$code)
+
+# Check if there are inner and outer London data available, code starts with "E13"
+greater_ld <- m_new %>% filter(str_detect(m_new$code, "E13")) 
+n_unique(greater_ld$code)
+unique(greater_ld$code)
+
+```
+
+```{r}
+# Add a new column defining inner / outer boroughs
+zoneld <- m_new %>% 
+  mutate(zone = case_when(
+    area %in% c("camden", "greenwich", "hackney", "hammersmith and fulham", "islington",
+"kensington and chelsea", "lambeth", "lewisham", "southwark", "tower hamlets", "wandsworth", "westminster") ~ "inner", 
+area %in% c("barking and dagenham", "barnet", "bexley","brent","bromley", "croydon", "ealing", "enfield", "haringey", "harrow", "havering", "hillingdon", "hounslow", "kingston upon thames", "merton", "newham", "redbridge", "richmond upon thames","sutton", "waltham forest") ~ "outer",
+TRUE ~ "other"))
+
+```
+
+```{r}
+# Add new column with extract year value from date 
+zoneld <-  zoneld %>% 
+mutate(date = ymd(date), year=as.numeric(substr(date, 1, 4)))
+```
+
+## Exploratory Data Analysis
+
+Plot histogram of houses price over years
+```{r}
+ggplot(m_new,aes(x=average_price))+ 
+  geom_histogram(colour = "darkgray", fill = "white", bins = 40)+
+ labs(xlab = "Steps", ylab = "Count", title = "Histogram of Houses Price Over Years")+
+ geom_vline(xintercept = mean(m_new$average_price, na.rm = TRUE), 
+          color = "red", show.legend = TRUE, size = 1.5)+
+ geom_vline(xintercept = median(m_new$average_price, na.rm = TRUE), 
+           color = "blue", show.legend = TRUE, size = 1.5)+
+ scale_color_manual(name = "statistics", values = c(mean = "red", median = "blue"))+
+scale_x_continuous(labels = scales::comma)
+```
+```{r fig.height=4, fig.width=8}
+# Correlation among variables
+corr <- m_new[, -c(1,2,4)]
+chart.Correlation(corr, histogram=TRUE, pch=19)
+
+```
+
+```{r}
+# Plot inner vs outer London 
+m_new <- m_new %>% 
+mutate(date = ymd(date),
+        year=as.numeric(substr(date, 1, 4)))
+m_new %>% 
+  filter(str_detect(code, c("E13", "E92"))) %>% 
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>% 
+ggplot(aes(x=date, y=mean_price, group=area, colour=area)) +
+  geom_line(lwd=.8)+
+theme_set(theme_minimal())+
+  labs(x= NULL, y="Average price (£)", title = "Average Houses Price London Vs England")+
+  scale_y_continuous(labels = scales::comma)+
+   scale_x_date(date_breaks = "2 years", date_labels = "%Y")
+
+```
+```{r fig.width=10, fig.show="hide"}
+# Plot number of houses sold across regions
+p8 <- m_new %>% 
+  filter(str_detect(code, "E12")) %>% 
+  group_by(area, date) %>% 
+  summarise(sum_sold = sum(houses_sold, na.rm = TRUE), .groups = "drop") %>% 
+ggplot(aes(x=reorder(area, sum_sold), y=sum_sold, group=area, fill=area)) +
+  geom_boxplot(show.legend = FALSE)+
+theme_set(theme_minimal())+
+  labs(x=NULL, y="number of houses sold", title = "Number of Houses Sold Across Regions")+
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r fig.width=10, fig.show="hide"}
+# Plot average houses price across regions
+p12 <- m_new %>% 
+  filter(str_detect(code, "E12")) %>% 
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>% 
+ggplot(aes(x=reorder(area, mean_price), y=mean_price, group=area, fill=area)) +
+  geom_boxplot(show.legend = FALSE)+
+theme_set(theme_minimal())+
+  labs(x=NULL, y="Average price", title = "Average Houses Price Across Regions")+
+  scale_y_continuous(labels = scales::comma)
+```
+
+```{r fig.height=6, fig.width=10}
+(p8 / p12) + plot_layout(ncol=1)
+```
+
+```{r}
+change <- m_new %>%
+  filter(str_detect(code, "E12")) %>% 
+  group_by(area, year) %>% 
+  arrange(year, .by_group = TRUE) %>%
+  summarise(pct_change = (houses_sold/lag(houses_sold) - 1) * 100, .groups = "drop") %>% 
+  ggplot(aes(area, pct_change, fill=area))+
+  geom_boxplot()+
+  theme(legend.position = "bottom")
+
+change
+```
+
+```{r fig.height=5, fig.width=6}
+# Plot compare average houses price across London boroughs
+p6 <- zoneld %>% 
+  filter(str_detect(code, "E09") & zone!="other") %>% 
+  group_by(area, date, zone) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>% 
+ggplot(aes(x=date, y=mean_price, group=area, color=area)) +
+  geom_line(lwd = 0.8)+
+theme_set(theme_minimal())+
+  labs(x="Date", y="Average price", title = "Average House Price London Boroughs")+
+  scale_y_continuous(labels = scales::comma)+
+   scale_x_date(date_breaks = "5 years", date_labels = "%Y")+
+  theme(legend.position = "bottom")+
+ gghighlight(max(mean_price),5, label_key = area)+
+  facet_wrap(~zone, ncol=1)
+```
+
+
+```{r fig.height=5, fig.width=6}
+# Plot compare number of houses sold London boroughs
+p7 <- zoneld %>%
+  filter(str_detect(code, "E09") & zone!="other") %>% 
+  group_by(area, date, zone) %>% 
+  summarise(sum_sold = sum(houses_sold, na.rm = TRUE), .groups = "drop") %>% 
+ggplot(aes(x=date, y=sum_sold, group=area, color=area)) +
+  geom_line(lwd = 0.8)+
+theme_set(theme_minimal())+
+  labs(x=NULL, y="number of houses", title = "Number of Houses Sold Across London Boroughs")+
+  scale_y_continuous(labels = scales::comma)+
+   scale_x_date(date_breaks = "5 years", date_labels = "%Y")+
+  theme(legend.position = "bottom")+
+ gghighlight(max(sum_sold),5, label_key = area)+
+  facet_wrap(~zone, ncol=1)
+```
+
+```{r fig.height=6, fig.width=12}
+(p6 | p7) + plot_layout(nrow=1)
+```
+
+```{r warning=FALSE, message=FALSE}
+# Plot average house price London and other regions
+p4 <- m_new %>% 
+  filter(str_detect(code, c("E92", "E12"))) %>%
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>% 
+ggplot(aes(x=date, y=mean_price, group=area, colour=area)) +
+  geom_line(lwd = .8)+
+theme_set(theme_minimal())+
+  labs(x= NULL, y= NULL, title = "Average House Price across regions")+
+  scale_y_continuous(labels = scales::comma)+
+   scale_x_date(date_breaks = "5 years", date_labels = "%Y")+
+  gghighlight(area==c("england", "london", "south east"), label_key = area)
+```
+
+
+```{r}
+# Plot compare Average houses price in London and other regions (2)
+p5 <- m_new %>% 
+  filter(str_detect(code, c("E13", "E12"))) %>% 
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>% 
+ggplot(aes(x=date, y=mean_price, group=area, color=area)) +
+  geom_line(show.legend = FALSE, lwd=.8)+
+  labs(x=NULL, y="Average price", title = "Average Houses Price London vs Other Regions")+
+  scale_y_continuous(labels = scales::comma)+
+  scale_x_date(date_breaks = "6 years", date_labels = "%Y")+
+   theme(legend.position = "bottom")+
+  facet_wrap(~area)+
+  expand_limits(y = 0)
+
+```
+
+```{r fig.height=6, fig.width=12}
+(p4 | p5) + plot_layout(ncol=2, widths =  c(.4, .6))
+```
+The heatmap chart below shows the *average houses price in each London borough by year*.
+
+```{r fig.height=5.5, fig.width=6}
+# Tile map of Average House Price by London boroughs
+p1 <- zoneld%>%
+  filter(str_detect(code, "E09")) %>%
+  group_by(area, zone, year) %>% 
+  summarise(mean_price = mean(average_price)/1000, .groups = "drop") %>% 
+  ggplot(mapping=aes(x = year, 
+                     y = factor(area, levels = rev(levels(factor(area)))))) +
+  geom_tile(aes(fill = mean_price), colour = "white", height = 1, width = 1) +
+  #labs(title = "Average Houses Price by London Boroughs",
+      # x = NULL, y = NULL, subtitle = "1995 to 2019") +
+  labs(title = "Average Houses Price by London Boroughs",
+       x = NULL, y = NULL) +
+  scale_fill_viridis_c(name="Avg Price (£ thousands)", 
+                     guide=guide_colorbar(frame.colour="black", ticks.colour="black"))
+```
+
+
+```{r fig.height=2, fig.width=5}
+# Tile map of Average House Price in Inner / Outer London 
+p2 <- m_new%>%
+  filter(str_detect(code, "E13")) %>%
+  group_by(area, year) %>% 
+  summarise(mean_price = mean(average_price)/1000, .groups = "drop") %>% 
+  ggplot(aes(x = year, 
+                     y = factor(area, levels = rev(levels(factor(area)))))) +
+  geom_tile(aes(fill = mean_price), colour = "white", height = 1, width = 1) +
+  #labs(title = "Average Houses Price in Inner/Outer London",
+     #  x = NULL, y = NULL, subtitle = "1995 to 2019") +
+  labs(x = NULL, y = NULL)+
+  scale_fill_viridis_c(option = "plasma", name="Avg Price (£ thousands)", 
+                     guide=guide_colorbar(frame.colour="black", ticks.colour="black"))+
+  theme(legend.position = "top")
+
+```
+
+```{r}
+# Plot Average houses price inner vs outer London 
+p3 <- m_new %>% 
+  filter(str_detect(code, "E13")) %>% 
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>% 
+ggplot(aes(x=date, y=mean_price, group=area, colour=area)) +
+  geom_line(lwd = .8, show.legend = FALSE)+
+ # labs(x= NULL, y= NULL, title = "Average Houses Price Inner vs Outer London")+
+  theme_set(theme_minimal())+
+  labs(x= NULL, y= NULL)+
+  scale_y_continuous(labels = scales::comma)+
+   scale_x_date(date_breaks = "5 years", date_labels = "%Y")+
+ # theme(legend.position = "bottom")+
+  facet_wrap(~area)
+
+```
+
+
+```{r fig.height=4, fig.width=5}
+# Plot average houses price across Inner/Outer boroughs
+inner.p <- zoneld %>% 
+  filter(str_detect(code, "E09") & zone=="inner") %>% 
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price, na.rm = TRUE),.groups = "drop") %>% 
+  ggplot(aes(x=reorder(area, mean_price), y=mean_price)) +
+   geom_bar(stat = "summary", fun = "mean", fill="darkorange2")+
+  coord_flip()+
+  labs(x=NULL, y=NULL, title = "Average House Price Across Inner Boroughs")+
+  scale_y_continuous(labels = scales::comma)
+outer.p <-zoneld %>% 
+  filter(str_detect(code, "E09") & zone=="outer") %>% 
+  group_by(area, date) %>% 
+  summarise(mean_price = mean(average_price, na.rm = TRUE),.groups = "drop") %>% 
+ ggplot(aes(x=reorder(area, mean_price), y=mean_price)) +
+   geom_bar(stat = "summary", fun = "mean", fill="darkslategrey")+
+  coord_flip()+
+  labs(x=NULL, y=NULL, title = "Average House Price Across Outer Boroughs")+
+ scale_y_continuous(labels = scales::comma)
+
+```
+
+```{r fig.height=5, fig.width=12, fig.show="hide"}
+# Plot number of houses across inner/outer boroughs
+(inner.p | outer.p) + plot_layout(ncol = 2, widths = c(0.6, 0.4))
+```
+
+```{r fig.height=10, fig.width=10}
+library(patchwork)
+p1 / p3/ (inner.p | outer.p)/ p2 + plot_layout(nrow=4, heights = c(0.45, .2, 0.3, 0.05))
+
+```
+
+```{r}
+# Tile map of number of houses sold by London boroughs
+p9 <- zoneld%>%
+  filter(str_detect(code, "E09")) %>%
+  group_by(area, zone, year) %>% 
+  summarise(sum_sold = sum(houses_sold), .groups = "drop") %>% 
+  ggplot(mapping=aes(x = year, 
+                     y = factor(area, levels = rev(levels(factor(area)))))) +
+  geom_tile(aes(fill = sum_sold), colour = "white", height = 1, width = 1) +
+ # labs(title = "Number of Houses Sold by London Boroughs",
+      # x = NULL, y = NULL, subtitle = "199./9. to 2018/19") +
+  labs(title = "Number of Houses Sold by London Boroughs",
+       x = NULL, y = NULL) +
+ # theme(legend.position = "top")+
+  scale_fill_viridis_c(option = "viridis", name="Number of houses",
+                     guide=guide_colorbar(frame.colour="black", ticks.colour="black"))
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Plot compare number houses sold in Inner/Outer London
+p10 <- m_new %>% 
+  filter(str_detect(code, "E13")) %>% 
+  group_by(area, date) %>% 
+  summarise(sum_sold = sum(houses_sold), .groups = "drop") %>% 
+ggplot(aes(x=date, y=sum_sold, group=area, color=area)) +
+  geom_line(show.legend = FALSE, lwd=.8)+
+theme_set(theme_minimal())+
+  #labs(x=NULL, y="Number of houses", title = "Number Houses Sold Inner Vs Outer London")+
+   labs(x=NULL, y=NULL)+
+  scale_y_continuous(labels = scales::comma)+
+  scale_x_date(date_breaks = "3 years", date_labels = "%Y")+
+   theme(legend.position = "bottom")+
+  facet_wrap(~area)+
+  expand_limits(y = 0)
+p10
+```
+
+
+```{r fig.height=2, fig.width=6}
+# Tile map of number of houses sold in Inner and Outer London
+p11 <- m_new%>%
+  filter(str_detect(code, "E13")) %>%
+  group_by(area, year) %>% 
+  summarise(sum_sold = sum(houses_sold), .groups = "drop") %>% 
+  ggplot(mapping=aes(x = year, 
+                     y = factor(area, levels = rev(levels(factor(area)))))) +
+  geom_tile(aes(fill = sum_sold), colour = "white", height = 1, width = 1) +
+  #labs(title = "Number of Houses Sold in Inner/Outer London",
+  #  x = NULL, y = NULL, subtitle = "1995 to 2019") +
+  labs(x = NULL, y = NULL) +
+  theme(legend.position = "bottom")+
+  scale_fill_viridis_c(option = "viridis", name="Number of Houses", 
+                     guide=guide_colorbar(frame.colour="black", ticks.colour="black"))
+```
+
+```{r boxplot, fig.height=4, fig.width=5}
+# Plot number of houses sold across Inner/Outer boroughs
+inner <- zoneld %>% 
+  filter(str_detect(code, "E09") & zone=="inner") %>% 
+  group_by(area, year, zone) %>% 
+  summarise(sum_sold = sum(houses_sold, na.rm = TRUE),.groups = "drop") %>% 
+  ggplot(aes(x=reorder(area, sum_sold), y=sum_sold)) +
+  geom_bar(stat = "summary", fun = "mean", fill="orange")+
+  coord_flip()+
+  labs(x=NULL, y=NULL, title = "Houses Sold Across Inner Boroughs")+
+  scale_y_continuous(labels = scales::comma)
+outer <-zoneld %>% 
+  filter(str_detect(code, "E09") & zone=="outer") %>% 
+  group_by(area, year, zone) %>% 
+  summarise(sum_sold = sum(houses_sold, na.rm = TRUE),.groups = "drop") %>% 
+ ggplot(aes(x=reorder(area, sum_sold), y=sum_sold)) +
+  geom_bar(stat = "summary", fun = "mean", fill="darkslategrey")+
+  coord_flip()+
+  labs(x=NULL, y=NULL, title = "Houses Sold Across Outer Boroughs")+
+ scale_y_continuous(labels = scales::comma)
+
+```
+
+```{r fig.height=5, fig.width=12, fig.show="hide"}
+# Plot number of houses across inner/outer boroughs
+(inner | outer) + plot_layout(ncol = 2, heights = c(0.4, 0.6))
+```
+
+Put all number of houses sold in one graph.
+```{r fig.height=10, fig.width=12, warning=FALSE, message=FALSE}
+p9 / p10 / (inner | outer) / p11 + plot_layout(nrow=4, heights = c(0.45, .2, 0.3, 0.05))
+
+```
+
+### Preliminary Analysis
+
+The data covers from month 1:1995 to month 1:2019, resulting in 299 observations.
+This time series analysis is using these 299 observations.
+
+```{r}
+# Filtering average house price values for London
+ld <- m_new %>% 
+ filter(str_detect(code, "E09")) %>% 
+  mutate(average_price = average_price/1000)
+
+# Creating a time series of average house price
+ldmonth.ts <- ts(ld[, 3], start = c(1995,1), end = c(2019, 12), frequency = 12)
+
+# Plot
+ts1 <- autoplot(ldmonth.ts, lwd = 0.8, col = "blue")+
+  ggtitle("Time plot: Average London House Price Per Month")+
+  ylab("Thousands of 2019  GBP Pounds")
+
+```
+Investigate transformation
+```{r}
+# Take the first difference of the data
+Dldmonth.ts <- diff(ldmonth.ts)
+
+# Plot
+ts2 <- autoplot(Dldmonth.ts)+
+  ggtitle("Time plot: Change in Average London House Price Per Month")+
+  ylab("Thousands of 2019  GBP Pounds")+
+  xlab("1:1995 to 12:2019")
+
+```
+
+```{r}
+# Series appears trend-stationary, use to investigate seasonality
+ts3 <- ggseasonplot(Dldmonth.ts)+
+  ggtitle("Change in Monthly Average House Price")+
+  ylab("Thousands of 2019 GBP Pounds")+
+  theme(legend.position = "bottom")
+
+```
+
+```{r}
+# Let's look at another seasonal plot, the subseries plot
+ts4 <- ggsubseriesplot(Dldmonth.ts)+
+  ggtitle("")+
+  ylab("Thousands of 2019 GBP Pounds")
+```
+
+```{r fig.height=10, fig.width=12}
+(ts1 + ts2) / (ts3+ts4)
+```
+
+**Observation:**
+* Our series, ldmonth.ts, has (or not has) trend and seasonality. => coi ky lai roi rut ra kl
+* To remove the trend, we take the first difference.
+* The first differenced series still has seasonality.
+
+```{r fig.height=7, fig.width=7}
+# Filter London values
+ld1 <- m_new %>% filter(area=="london")
+#unique(ld1$code)
+# Creating a time series
+ld1month.ts <- ts(ld1[, 3], start = c(1995,1), end = c(2019, 12), frequency = 12)
+# Decompose
+london_decomposed <- decompose(ld1month.ts)
+plot(london_decomposed, col="blue", lwd = .8)
+
+```
+
+The average house price of Greater London between 1995 and 2019 and inferences around the overall trend and seasonality.
+
+## Visualization
+
+```{r}
+#create London Boroughs grid
+london_grid <- tribble(~code, ~row, ~col, ~name,
+                       "E09000001",	4,	5,	"City of London",
+                       "E09000002",	4,	8,	"Barking and Dagenham",
+                       "E09000003",	2,	4,	"Barnet",
+                       "E09000004",	5,	8,	"Bexley",
+                       "E09000005",	3,	3,	"Brent",
+                       "E09000006",	6,	6,	"Bromley",
+                       "E09000007",	3,	4,	"Camden",
+                       "E09000008",	6,	5,	"Croydon",
+                       "E09000009",	3,	2,	"Ealing",
+                       "E09000010",	1,	5,	"Enfield",
+                       "E09000011",	5,	7,	"Greenwich",
+                       "E09000012",	3,	6,	"Hackney",
+                       "E09000013",	4,	2,	"Hammersmith and Fulham",
+                       "E09000014",	2,	5,	"Haringey",
+                       "E09000015",	2,	3,	"Harrow",
+                       "E09000016",	3,	8,	"Havering",
+                       "E09000017",	3,	1,	"Hillingdon",
+                       "E09000018",	4,	1,	"Hounslow",
+                       "E09000019",	3,	5,	"Islington",
+                       "E09000020",	4,	3,	"Kensington and Chelsea",
+                       "E09000021",	5,	2,	"Kingston upon Thames",
+                       "E09000022",	5,	4,	"Lambeth",
+                       "E09000023",	5,	6,	"Lewisham",
+                       "E09000024",	6,	4,	"Merton",
+                       "E09000025",	4,	7,	"Newham",
+                       "E09000026",	3,	7,	"Redbridge",
+                       "E09000027",	6,	3,	"Richmond upon Thames",
+                       "E09000028",	5,	5,	"Southwark",
+                       "E09000029",	7,	4,	"Sutton",
+                       "E09000030",	4,	6,	"Tower Hamlets",
+                       "E09000031",	2,	6,	"Waltham Forest",
+                       "E09000032",	5,	3,	"Wandsworth",
+                       "E09000033",	4,	4,	"Westminster"
+)
+
+```
+
+```{r}
+#merge
+ld_houses <- left_join(m_new, london_grid, by = c("code" = "code"))
+ld_houses <- ld_houses %>% 
+mutate(date = ymd(date),
+  year=as.numeric(substr(date, 1, 4))) 
+ld_houses
+```
+
+```{r fig.height=10, fig.width=12, message=FALSE, warning=FALSE}
+# plot
+ld_houses %>% 
+ filter(str_detect(code, "E09")) %>% 
+  group_by(name, year) %>% 
+  summarise(mean_price = mean(average_price), .groups = "drop") %>%
+  ggplot(aes(x=year, y=mean_price)) +
+geom_col(fill="darkcyan")+
+  scale_x_continuous(breaks = c(1996, 2016), labels = c(1996, 2016)) +
+  scale_y_continuous(breaks = c(500000, 1000000, 1500000), labels = c("0.5M","1M","1.5M")) +
+facet_geo(~name, grid = london_grid)+
+  labs(title = "Housing Price trends in London Boroughs 1995 - 2019",
+       caption = "Annualised average price",
+       x = "1995 - 2019",
+       y = "Annualised price") +
+ theme(strip.text.x = element_text(size = 8.5, margin=margin(0.1,0,0.1,0,"cm")),
+       strip.background = element_rect(fill = "slategray2"),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+```
+
+```{r fig.height=10, fig.width=12, message=FALSE, warning=FALSE}
+# plot number of houses sold
+ld_houses %>% 
+ filter(str_detect(code, "E09")) %>% 
+  group_by(name, year) %>% 
+  summarise(sum_sold = sum(houses_sold, na.omit = TRUE), .groups = "drop") %>% 
+  ggplot(aes(x=year, y=sum_sold)) +
+geom_col(fill="deepskyblue4")+
+  scale_x_continuous(breaks = c(1996, 2016), labels = c(1996, 2016)) +
+  scale_y_continuous(breaks = c(500000, 1000000, 1500000), labels = c("0.5M","1M","1.5M")) +
+facet_geo(~name, grid = london_grid)+
+  labs(title = "Houses Sold trends in London Boroughs 1995 - 2019",
+       caption = "Annualised average price",
+       x = "1995 - 2019",
+       y = "Annualised price") +
+ theme(strip.text.x = element_text(size = 8.5, margin=margin(0.1,0,0.1,0,"cm")),
+       strip.background = element_rect(fill = "slategray2"),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+```
