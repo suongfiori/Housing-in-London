@@ -1,4 +1,4 @@
-# Housing-in-London
+# Project 2: Housing-in-London
 
 This project aims to explore the housing market of London in the years between 1995 and 2020. 
 We are going to perform exploratory data analysis to discover new information and answer the following questions:
